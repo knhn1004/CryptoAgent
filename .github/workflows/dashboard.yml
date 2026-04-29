@@ -1,0 +1,42 @@
+name: dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard.yml"
+  pull_request:
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: skip if not scaffolded
+        id: gate
+        run: |
+          if [ ! -f package.json ]; then
+            echo "no package.json yet — skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: install
+        if: steps.gate.outputs.skip != 'true'
+        run: npm ci
+      - name: lint
+        if: steps.gate.outputs.skip != 'true'
+        run: npm run lint --if-present
+      - name: build
+        if: steps.gate.outputs.skip != 'true'
+        run: npm run build
