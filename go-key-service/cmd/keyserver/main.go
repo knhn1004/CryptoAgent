@@ -1,6 +1,7 @@
 package main
 
 import (
+<<<<<<< HEAD
 	"context"
 	"errors"
 	"log/slog"
@@ -9,8 +10,15 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+=======
+	"fmt"
+	"log"
+	"net/http"
+>>>>>>> f1c2c79 (Ed25519 keypair generation & registration API)
 
+	"github.com/gorilla/mux"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/action"
+<<<<<<< HEAD
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/config"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/httpapi"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/keystore"
@@ -58,4 +66,14 @@ func main() {
 		logger.Error("shutdown", "err", err)
 		os.Exit(1)
 	}
+=======
+	"github.com/knhn1004/CryptoAgent/go-key-service/internal/keys"
+)
+
+func main() {
+	fmt.Printf("CryptoAgent key-service (schema v%d) listening on :8080\n", action.SchemaVersion)
+	r := mux.NewRouter()
+	keys.RegisterRoutes(r, keys.NewMemoryStore())
+	log.Fatal(http.ListenAndServe(":8080", r))
+>>>>>>> f1c2c79 (Ed25519 keypair generation & registration API)
 }
