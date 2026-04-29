@@ -1,0 +1,10 @@
+# Default reviewer for every PR.
+*                       @knhn1004
+
+# Per-area ownership. Add teammates' GitHub handles as they pick up areas.
+/go-key-service/        @knhn1004
+/sdk-python/            @knhn1004
+/dashboard/             @knhn1004
+/contracts/             @knhn1004
+/docs/                  @knhn1004
+/.github/               @knhn1004

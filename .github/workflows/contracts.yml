@@ -1,0 +1,38 @@
+name: contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "contracts/**"
+      - ".github/workflows/contracts.yml"
+  pull_request:
+    paths:
+      - "contracts/**"
+      - ".github/workflows/contracts.yml"
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: skip if not scaffolded
+        id: gate
+        run: |
+          if [ ! -f foundry.toml ]; then
+            echo "foundry project not initialised yet — skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: foundry-rs/foundry-toolchain@v1
+        if: steps.gate.outputs.skip != 'true'
+      - name: build
+        if: steps.gate.outputs.skip != 'true'
+        run: forge build --sizes
+      - name: test
+        if: steps.gate.outputs.skip != 'true'
+        run: forge test -vvv

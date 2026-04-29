@@ -1,1 +1,32 @@
+# OS
 .DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Go
+go-key-service/bin/
+*.test
+*.out
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Node / dashboard
+node_modules/
+dashboard/dist/
+dashboard/.vite/
+
+# Foundry / contracts
+contracts/cache/
+contracts/out/
+contracts/lib/
+contracts/broadcast/
