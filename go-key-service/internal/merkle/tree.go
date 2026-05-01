@@ -3,8 +3,9 @@
 // for the root-consistency job (issue #12).
 //
 // Hash domain separation matches RFC 6962:
-//   leaf hash      = SHA-256(0x00 || data)
-//   internal node  = SHA-256(0x01 || left || right)
+//
+//	leaf hash      = SHA-256(0x00 || data)
+//	internal node  = SHA-256(0x01 || left || right)
 package merkle
 
 import (

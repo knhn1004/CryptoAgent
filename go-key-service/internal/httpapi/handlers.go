@@ -155,4 +155,3 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 		)
 	})
 }
-
