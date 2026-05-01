@@ -14,11 +14,11 @@ import (
 )
 
 type interopVector struct {
-	Action        action.Action `json:"action"`
-	CanonicalHex  string        `json:"canonical_hex"`
-	PublicKey     string        `json:"public_key"`
-	Seed          string        `json:"seed"`
-	SignatureHex  string        `json:"signature_hex"`
+	Action       action.Action `json:"action"`
+	CanonicalHex string        `json:"canonical_hex"`
+	PublicKey    string        `json:"public_key"`
+	Seed         string        `json:"seed"`
+	SignatureHex string        `json:"signature_hex"`
 }
 
 func loadVector(t *testing.T) interopVector {

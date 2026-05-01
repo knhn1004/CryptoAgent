@@ -38,11 +38,11 @@ func main() {
 	}
 
 	out := map[string]any{
-		"seed":           hex.EncodeToString(seed),
-		"public_key":     hex.EncodeToString(pub),
-		"action":         a,
-		"canonical_hex":  hex.EncodeToString(canonical),
-		"signature_hex":  hex.EncodeToString(sig),
+		"seed":          hex.EncodeToString(seed),
+		"public_key":    hex.EncodeToString(pub),
+		"action":        a,
+		"canonical_hex": hex.EncodeToString(canonical),
+		"signature_hex": hex.EncodeToString(sig),
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
