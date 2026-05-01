@@ -3,12 +3,17 @@ name = "cryptoagent"
 version = "0.1.0"
 description = "CryptoAgent Python SDK — signed actions, multi-sig helpers, LangChain decorators"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "pynacl>=1.5",
+]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
     "ruff>=0.6",
+]
+langchain = [
+    "langchain-core>=0.3",
 ]
 
 [build-system]
