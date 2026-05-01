@@ -34,9 +34,7 @@ class ACL:
 
     def require(self, agent_id: str, capability: str) -> None:
         if not self.has(agent_id, capability):
-            raise CapabilityError(
-                f"agent {agent_id!r} lacks capability {capability!r}"
-            )
+            raise CapabilityError(f"agent {agent_id!r} lacks capability {capability!r}")
 
     def capabilities(self, agent_id: str) -> set[str]:
         return set(self._caps.get(agent_id, ()))

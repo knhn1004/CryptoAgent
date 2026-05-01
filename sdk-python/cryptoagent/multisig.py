@@ -136,9 +136,7 @@ def gated(gate: Gate, action_type: str) -> Callable:
         def wrapper(*args, **kwargs):
             if not gate.is_executing():
                 gate.report_bypass(action_type, reason=f"direct call to {fn.__qualname__}")
-                raise BypassError(
-                    f"{action_type}: must be invoked via Gate.execute"
-                )
+                raise BypassError(f"{action_type}: must be invoked via Gate.execute")
             return fn(*args, **kwargs)
 
         wrapper.__cryptoagent_gated__ = (gate, action_type)  # type: ignore[attr-defined]

@@ -102,9 +102,7 @@ def requires_capability(
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             if agent_id_arg not in kwargs:
-                raise TypeError(
-                    f"@requires_capability needs kwarg {agent_id_arg!r}"
-                )
+                raise TypeError(f"@requires_capability needs kwarg {agent_id_arg!r}")
             acl.require(kwargs[agent_id_arg], capability)
             return fn(*args, **kwargs)
 

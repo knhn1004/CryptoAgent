@@ -45,13 +45,9 @@ def sign(action: Action, private_key: bytes) -> bytes:
 
 def verify(action: Action, signature: bytes, public_key: bytes) -> None:
     if len(public_key) != PUBLIC_KEY_LEN:
-        raise ValueError(
-            f"public key must be {PUBLIC_KEY_LEN} bytes, got {len(public_key)}"
-        )
+        raise ValueError(f"public key must be {PUBLIC_KEY_LEN} bytes, got {len(public_key)}")
     if len(signature) != SIGNATURE_LEN:
-        raise SignatureError(
-            f"signature must be {SIGNATURE_LEN} bytes, got {len(signature)}"
-        )
+        raise SignatureError(f"signature must be {SIGNATURE_LEN} bytes, got {len(signature)}")
     vk = VerifyKey(public_key)
     msg = action.canonical()
     try:
