@@ -4,36 +4,24 @@ CryptoAgent has four runtime components. Three are first-party
 (key-service, SDK, dashboard); the fourth (anchor contract) is a
 periodically-invoked Solidity contract on a public chain.
 
-```
-        ┌────────────────────────────────────────────────────────────┐
-        │                       Agent Process                        │
-        │                                                            │
-        │   ┌──────────────────┐     ┌──────────────────────────┐    │
-        │   │ LangChain Agent  │ ──▶ │ cryptoagent SDK          │    │
-        │   │ + Tools          │     │  • signed_action         │    │
-        │   └──────────────────┘     │  • requires_capability   │    │
-        │                            │  • multi_sig / Gate      │    │
-        │                            │  • signing.sign/verify   │    │
-        │                            └────────────┬─────────────┘    │
-        └─────────────────────────────────────────┼──────────────────┘
-                  ▲                               │
-                  │ pub keys, capabilities        │ Action+sig events
-                  │                               ▼
-        ┌─────────┴────────────┐       ┌──────────────────────────┐
-        │ go-key-service       │       │ Merkle audit log         │
-        │  POST /v1/keys       │       │ (internal/merkle)        │
-        │  GET  /v1/keys/:id   │       │  • RFC 6962 tree         │
-        │  POST /v1/merkle/    │ ◀──── │  • ProofForRange         │
-        │       verify         │       │  • Verifier              │
-        └──────────┬───────────┘       └────────────┬─────────────┘
-                   │                                │
-                   │              periodic root     │
-                   │              (size, root_hex)  │
-                   ▼                                ▼
-         ┌──────────────────┐            ┌──────────────────────┐
-         │ Dashboard (web)  │            │ Anchor contract      │
-         │ (React/TS)       │            │ (Foundry, on-chain)  │
-         └──────────────────┘            └──────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Agent["Agent Process"]
+        LC["LangChain Agent + Tools"]
+        SDK["cryptoagent SDK<br/>• signed_action<br/>• requires_capability<br/>• multi_sig / Gate<br/>• signing.sign / verify"]
+        LC --> SDK
+    end
+
+    KS["go-key-service<br/>POST /v1/keys<br/>GET /v1/keys/:id<br/>POST /v1/merkle/verify"]
+    Merkle["Merkle audit log<br/>(internal/merkle)<br/>• RFC 6962 tree<br/>• ProofForRange<br/>• Verifier"]
+    Dash["Dashboard (web)<br/>React / TS"]
+    Anchor["Anchor contract<br/>Foundry, on-chain"]
+
+    KS -- "pub keys, capabilities" --> SDK
+    SDK -- "Action + sig events" --> Merkle
+    Merkle -- "consistency proofs" --> KS
+    KS --> Dash
+    Merkle -- "periodic (size, root_hex)" --> Anchor
 ```
 
 ## Components
