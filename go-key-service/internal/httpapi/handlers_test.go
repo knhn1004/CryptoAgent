@@ -126,6 +126,77 @@ func TestList(t *testing.T) {
 	}
 }
 
+func TestAgentsCreateAndGetPubKey(t *testing.T) {
+	h := newTestServer().Router()
+
+	rec, body := do(t, h, http.MethodPost, "/v1/keys/agents", map[string]string{"agent_id": "agent1"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status: got %d want 201", rec.Code)
+	}
+	pub, _ := body["public_key"].(string)
+	if len(pub) != 64 {
+		t.Fatalf("public_key hex length: got %d", len(pub))
+	}
+	if body["agent_id"] != "agent1" {
+		t.Fatalf("agent_id: %v", body["agent_id"])
+	}
+
+	rec, body = do(t, h, http.MethodGet, "/v1/keys/agents/agent1/pubkey", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get status: got %d want 200", rec.Code)
+	}
+	if body["public_key"] != pub {
+		t.Fatal("get returned different public key")
+	}
+	if body["agent_id"] != "agent1" {
+		t.Fatalf("agent_id: %v", body["agent_id"])
+	}
+}
+
+func TestAgentsCreateMissingField(t *testing.T) {
+	h := newTestServer().Router()
+	rec, body := do(t, h, http.MethodPost, "/v1/keys/agents", map[string]string{})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", rec.Code)
+	}
+	if body["error"] != "missing_field" {
+		t.Fatalf("error code: %v", body["error"])
+	}
+}
+
+func TestAgentsCreateBadJSON(t *testing.T) {
+	h := newTestServer().Router()
+	req := httptest.NewRequest(http.MethodPost, "/v1/keys/agents", bytes.NewReader([]byte("not-json")))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d", rec.Code)
+	}
+}
+
+func TestAgentsCreateDuplicate(t *testing.T) {
+	h := newTestServer().Router()
+	do(t, h, http.MethodPost, "/v1/keys/agents", map[string]string{"agent_id": "dup"})
+	rec, body := do(t, h, http.MethodPost, "/v1/keys/agents", map[string]string{"agent_id": "dup"})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status: got %d want 409", rec.Code)
+	}
+	if body["error"] != "already_exists" {
+		t.Fatalf("error code: %v", body["error"])
+	}
+}
+
+func TestGetAgentPubKeyMissing(t *testing.T) {
+	h := newTestServer().Router()
+	rec, body := do(t, h, http.MethodGet, "/v1/keys/agents/nope/pubkey", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404", rec.Code)
+	}
+	if body["error"] != "not_found" {
+		t.Fatalf("error code: %v", body["error"])
+	}
+}
+
 func TestDelete(t *testing.T) {
 	h := newTestServer().Router()
 	do(t, h, http.MethodPost, "/v1/keys", map[string]string{"agent_id": "rm"})
