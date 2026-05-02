@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 )
 
@@ -27,6 +28,8 @@ const (
 type Tree struct {
 	mu     sync.RWMutex
 	leaves [][]byte // leaf hashes (already prefix-hashed via HashLeaf)
+	file   *os.File // optional append-only backing file (set by Open)
+	closed bool
 }
 
 func New() *Tree { return &Tree{} }
@@ -48,26 +51,35 @@ func HashChildren(left, right []byte) []byte {
 	return h.Sum(nil)
 }
 
-// Append hashes data into a leaf and adds it. Returns the new leaf index.
-func (t *Tree) Append(data []byte) uint64 {
+// Append hashes data into a leaf, adds it, and (if backed by a file)
+// flushes the leaf hash to disk before returning. Returns the new leaf
+// index.
+func (t *Tree) Append(data []byte) (uint64, error) {
+	leafHash := HashLeaf(data)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.leaves = append(t.leaves, HashLeaf(data))
-	return uint64(len(t.leaves) - 1)
+	if err := t.persistLocked(leafHash); err != nil {
+		return 0, err
+	}
+	t.leaves = append(t.leaves, leafHash)
+	return uint64(len(t.leaves) - 1), nil
 }
 
-// AppendHashed adds an already-hashed leaf. Used by the verifier to
-// reconstruct trees from external snapshots.
-func (t *Tree) AppendHashed(leafHash []byte) uint64 {
+// AppendHashed adds an already-hashed leaf and persists it. Used by the
+// verifier to reconstruct trees from external snapshots.
+func (t *Tree) AppendHashed(leafHash []byte) (uint64, error) {
 	if len(leafHash) != HashSize {
-		panic(fmt.Sprintf("merkle: leaf hash must be %d bytes, got %d", HashSize, len(leafHash)))
+		return 0, fmt.Errorf("merkle: leaf hash must be %d bytes, got %d", HashSize, len(leafHash))
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	cp := make([]byte, HashSize)
 	copy(cp, leafHash)
+	if err := t.persistLocked(cp); err != nil {
+		return 0, err
+	}
 	t.leaves = append(t.leaves, cp)
-	return uint64(len(t.leaves) - 1)
+	return uint64(len(t.leaves) - 1), nil
 }
 
 func (t *Tree) Size() uint64 {

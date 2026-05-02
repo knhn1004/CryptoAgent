@@ -17,17 +17,33 @@ Per `docs/schema.md`, the `data` for a real action is
 ## API surface
 
 ```go
+// In-memory tree
 t := merkle.New()
-t.Append(payload)                   // returns leaf index
-t.Root()                             // current head, 32 B
-t.RootAt(size)                       // root over first N leaves
-t.ProofForRange(oldSize, newSize)    // RFC 6962 consistency proof
+idx, err := t.Append(payload)        // returns leaf index
+t.Root()                              // current head, 32 B
+t.RootAt(size)                        // root over first N leaves
 
+// Inclusion proofs (issue #10)
+proof, _ := t.Proof(idx)              // RFC 6962 audit path
+merkle.VerifyInclusion(payload, idx, t.Size(), proof, t.Root())
+t.ProofAt(idx, size)                  // proof against a historical size
+
+// Consistency proofs (issue #12)
+t.ProofForRange(oldSize, newSize)
 merkle.VerifyConsistency(oldRoot, newRoot, oldSize, newSize, proof)
+
+// Persistent tree (flat-file, fsync per append)
+t, err := merkle.Open("/var/lib/merkle/leaves.log")
+defer t.Close()
+t.Append(payload)                     // also writes 32 B + fsyncs
 
 v := merkle.NewVerifier(t)
 report, err := v.VerifyHistoricalRoot(historicalRoot, historicalSize)
 ```
+
+The flat-file format is a concatenation of 32-byte leaf hashes; size on
+disk is always `Size() * 32` bytes. Reopening the same path reloads the
+exact tree state.
 
 `VerificationReport` includes `OK`, hex-encoded live and historical
 roots, both sizes, and a human-readable `Message` (e.g. `derived old
