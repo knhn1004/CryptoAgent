@@ -33,6 +33,7 @@ from .proposal import (
     ProposalError,
     ProposalFlow,
     ReplayError,
+    ThresholdNotReached,
 )
 from .signing import (
     SignatureError,
@@ -63,6 +64,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "SignatureError",
     "ThresholdNotMetError",
+    "ThresholdNotReached",
     "current_signed_action",
     "gated",
     "generate_keypair",

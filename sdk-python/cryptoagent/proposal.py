@@ -20,7 +20,6 @@ import time
 import urllib.request
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, wait
-from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -70,7 +69,16 @@ class Proposal:
 
 @runtime_checkable
 class Peer(Protocol):
-    """Anything with a public key that can sign a proposal (or abstain)."""
+    """Anything with a public key that can sign a proposal (or abstain).
+
+    Implementations should self-impose a deadline on ``sign``. The
+    :class:`ProposalFlow` honours an overall ``timeout_s`` for the batch
+    via thread cancellation, but a peer that blocks past that deadline
+    keeps its worker thread alive until the call resolves (Python's
+    :class:`~concurrent.futures.ThreadPoolExecutor` workers are not
+    daemons, so a runaway peer can stall process exit). For
+    network-backed peers, set a per-call timeout on the HTTP client.
+    """
 
     agent_id: str
     public_key: bytes
@@ -148,11 +156,23 @@ class _UrllibPoster:
 
 
 class MerkleHTTPAuditSink:
-    """Posts each audit record to the Go service's ``/v1/audit/append`` endpoint.
+    """Posts accepted proposals to the Go service's ``/v1/audit/append`` endpoint.
 
-    The HTTP client is injectable so tests don't hit the network; the default
-    uses :mod:`urllib.request` to keep the SDK dep-light. Errors propagate to
-    the caller — :class:`ProposalFlow` is responsible for swallowing them.
+    Wire shape matches the Go ``appendRequest``: ``{"action": <canonical
+    action object>, "signature": "<hex>"}`` where the action uses the same
+    JSON keys as ``action.canonical()`` (notably ``timestamp``, not
+    ``timestamp_ms``) and ``signature`` is the proposer's signature — the
+    byte string the Go pipeline verifies before appending.
+
+    Rejected records are skipped: the Go endpoint is itself the
+    verification gate and would 401 on a sig it can't verify. Callers that
+    need rejected proposals to land somewhere durable should chain a
+    second sink.
+
+    The HTTP client is injectable so tests don't hit the network; the
+    default uses :mod:`urllib.request` to keep the SDK dep-light. Errors
+    propagate to the caller — :class:`ProposalFlow` is responsible for
+    swallowing them.
     """
 
     def __init__(
@@ -175,24 +195,13 @@ class MerkleHTTPAuditSink:
         accepted: bool,
         reason: str = "",
     ) -> None:
-        body = {
-            "action": {
-                "schema_version": proposal.action.schema_version,
-                "agent_id": proposal.action.agent_id,
-                "action_type": proposal.action.action_type,
-                "target": proposal.action.target,
-                "timestamp_ms": proposal.action.timestamp_ms,
-                "nonce": proposal.action.nonce,
-            },
-            "proposer_id": proposal.proposer_id,
-            "proposer_pub_hex": proposal.proposer_pub.hex(),
-            "proposer_sig_hex": proposal.proposer_sig.hex(),
-            "signatures": [
-                {"public_key_hex": pub.hex(), "signature_hex": sig.hex()} for pub, sig in signatures
-            ],
-            "accepted": accepted,
-            "reason": reason,
-        }
+        if not accepted:
+            return
+        # Round-trip through canonical() so the wire keys (notably
+        # "timestamp", not "timestamp_ms") match Go's struct tags exactly.
+        # action.canonical() is the single source of truth for both sides.
+        action_obj = json.loads(proposal.action.canonical())
+        body = {"action": action_obj, "signature": proposal.proposer_sig.hex()}
         self._http.post_json(
             self._url,
             body,
@@ -289,8 +298,8 @@ class ProposalFlow:
             for fut in done:
                 peer = futures[fut]
                 try:
-                    pub_sig = fut.result(timeout=0)
-                except (FuturesTimeoutError, Exception) as e:  # noqa: BLE001
+                    pub_sig = fut.result()
+                except Exception as e:  # noqa: BLE001 — policy is to skip and log
                     self._logger.debug("peer raised", extra={"peer": peer.agent_id, "err": repr(e)})
                     continue
                 if pub_sig is None:

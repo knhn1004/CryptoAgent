@@ -286,7 +286,56 @@ def test_propose_and_run_end_to_end():
 # ---------- MerkleHTTPAuditSink (no real network) --------------------------
 
 
-def test_merkle_http_audit_sink_posts_json():
+def test_merkle_http_audit_sink_posts_go_compatible_body():
+    """Wire shape matches the Go /v1/audit/append handler exactly."""
+    fake = FakeHTTP()
+    sink = MerkleHTTPAuditSink("http://example.invalid", http=fake)
+    a = make_action()
+    pub, priv, pid = make_proposer()
+    proposer_sig = sign(a, priv)
+    proposal = Proposal(
+        action=a,
+        proposer_id=pid,
+        proposer_pub=pub,
+        proposer_sig=proposer_sig,
+        created_at_ms=1_700_000_000_000,
+    )
+    sink.record(
+        proposal=proposal,
+        signatures=[(pub, proposer_sig)],
+        accepted=True,
+        reason="",
+    )
+    assert fake.calls, "expected an HTTP call"
+    call = fake.calls[0]
+    assert call["url"].endswith("/v1/audit/append")
+    assert call["method"] == "POST"
+    assert call["headers"]["Content-Type"] == "application/json"
+
+    body = call["json"]
+    assert set(body.keys()) == {"action", "signature"}
+    assert body["signature"] == proposer_sig.hex()
+
+    # Action must use the canonical wire keys — notably "timestamp" (not
+    # "timestamp_ms") so Go's `json:"timestamp"` tag picks it up.
+    action_obj = body["action"]
+    assert action_obj == {
+        "schema_version": a.schema_version,
+        "agent_id": a.agent_id,
+        "action_type": a.action_type,
+        "target": a.target,
+        "timestamp": a.timestamp_ms,
+        "nonce": a.nonce,
+    }
+    # Round-trip equality with canonical bytes proves Go can re-derive the
+    # exact message that was signed.
+    import json as _json
+
+    assert _json.dumps(action_obj, sort_keys=True, separators=(",", ":")).encode() == a.canonical()
+
+
+def test_merkle_http_audit_sink_skips_rejected_records():
+    """Rejected proposals would 401 against the Go endpoint, so don't post."""
     fake = FakeHTTP()
     sink = MerkleHTTPAuditSink("http://example.invalid", http=fake)
     a = make_action()
@@ -300,18 +349,11 @@ def test_merkle_http_audit_sink_posts_json():
     )
     sink.record(
         proposal=proposal,
-        signatures=[(pub, sign(a, priv))],
-        accepted=True,
-        reason="",
+        signatures=[],
+        accepted=False,
+        reason="threshold_not_met",
     )
-    assert fake.calls, "expected an HTTP call"
-    call = fake.calls[0]
-    assert call["url"].endswith("/v1/audit/append")
-    assert call["method"] == "POST"
-    assert call["headers"]["Content-Type"] == "application/json"
-    assert call["json"]["accepted"] is True
-    assert call["json"]["action"]["nonce"] == a.nonce
-    assert call["json"]["proposer_id"] == pid
+    assert fake.calls == []
 
 
 def test_merkle_http_audit_sink_swallow_errors_via_flow():
