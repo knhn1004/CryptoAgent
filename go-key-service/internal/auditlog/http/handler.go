@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/action"
@@ -104,8 +105,8 @@ func (h *handler) stream(w http.ResponseWriter, r *http.Request) {
 
 	since := uint64(0)
 	if v := r.URL.Query().Get("since"); v != "" {
-		var parsed uint64
-		if _, err := fmt.Sscanf(v, "%d", &parsed); err != nil {
+		parsed, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_since", err.Error())
 			return
 		}

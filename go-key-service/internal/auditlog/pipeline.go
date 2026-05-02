@@ -102,8 +102,13 @@ type Pipeline struct {
 
 	subBuffer int
 
-	mu     sync.Mutex
-	seen   map[string]*Event
+	mu   sync.Mutex
+	seen map[string]*Event
+	// events retains every appended Event so EventsSince() can backfill
+	// reconnecting subscribers. Bounded only by process lifetime — fine
+	// for the in-memory scope of the current service. A ring buffer or an
+	// external store is the right next step before a long-running
+	// production deployment.
 	events []*Event
 	subs   map[uint64]chan Event
 	nextID uint64
