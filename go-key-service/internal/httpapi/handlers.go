@@ -33,6 +33,8 @@ func (s *Server) Router() http.Handler {
 	r.Route("/v1/keys", func(r chi.Router) {
 		r.Get("/", s.handleList)
 		r.Post("/", s.handleCreate)
+		r.Post("/agents", s.handleAgents)
+		r.Get("/agents/{agentID}/pubkey", s.handleGetAgentPubKey)
 		r.Get("/{agentID}", s.handleGet)
 		r.Delete("/{agentID}", s.handleDelete)
 	})
@@ -108,6 +110,42 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if body.AgentID == "" {
+		writeError(w, http.StatusBadRequest, "missing_field", "agent_id is required")
+		return
+	}
+	pub, err := s.store.Create(r.Context(), body.AgentID)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, keyResponse{
+		AgentID:   body.AgentID,
+		PublicKey: hex.EncodeToString(pub),
+	})
+}
+
+func (s *Server) handleGetAgentPubKey(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "agentID")
+	pub, _, err := s.store.Get(r.Context(), id)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, keyResponse{
+		AgentID:   id,
+		PublicKey: hex.EncodeToString(pub),
+	})
 }
 
 func (s *Server) writeStoreError(w http.ResponseWriter, err error) {
