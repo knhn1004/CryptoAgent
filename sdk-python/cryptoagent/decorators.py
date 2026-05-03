@@ -18,7 +18,7 @@ import threading
 import time
 from collections.abc import Callable
 
-from .acl import ACL
+from .acl import ACL, UnauthorizedMetrics
 from .action import Action
 from .multisig import Gate
 from .signing import sign
@@ -119,6 +119,7 @@ def requires_token(
     *,
     action_type: str,
     target: str,
+    metrics: UnauthorizedMetrics | None = None,
 ) -> Callable:
     """Reject the call unless the active token authorizes
     ``(action_type, target)`` for the calling agent.
@@ -131,6 +132,11 @@ def requires_token(
 
     Must be applied *inside* ``@signed_action`` so the agent_id is
     available.
+
+    If ``metrics`` is supplied, every rejection increments the
+    per-action-type unauthorized counter — the success-metric input the
+    proposal asks for. Decisions are still authoritative even when
+    ``metrics`` is ``None``.
     """
 
     def deco(fn: Callable) -> Callable:
@@ -138,17 +144,26 @@ def requires_token(
         def wrapper(*args, **kwargs):
             ctx = current_signed_action()
             if ctx is None:
+                if metrics is not None:
+                    metrics.record(action_type)
                 raise TokenError("@requires_token must be inside @signed_action")
             action, _ = ctx
             token = current_token()
             if token is None:
+                if metrics is not None:
+                    metrics.record(action_type)
                 raise TokenError("no active token in context")
-            client.verify(
-                token,
-                action_type=action_type,
-                target=target,
-                agent_id=action.agent_id,
-            )
+            try:
+                client.verify(
+                    token,
+                    action_type=action_type,
+                    target=target,
+                    agent_id=action.agent_id,
+                )
+            except TokenError:
+                if metrics is not None:
+                    metrics.record(action_type)
+                raise
             return fn(*args, **kwargs)
 
         return wrapper
