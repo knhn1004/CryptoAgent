@@ -12,6 +12,7 @@ import (
 
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/action"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/auditlog"
+	"github.com/knhn1004/CryptoAgent/go-key-service/internal/capability"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/config"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/httpapi"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/keystore"
@@ -32,9 +33,17 @@ func main() {
 	store := keystore.NewMemory()
 	tree := merkle.New()
 	pipeline := auditlog.New(tree, store)
+	capSvc, err := capability.NewService(store, capability.Options{Logger: logger})
+	if err != nil {
+		logger.Error("capability", "err", err)
+		os.Exit(1)
+	}
 	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           httpapi.NewServer(store, logger).WithAuditPipeline(pipeline).Router(),
+		Addr: cfg.Addr,
+		Handler: httpapi.NewServer(store, logger).
+			WithAuditPipeline(pipeline).
+			WithCapability(capSvc).
+			Router(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
