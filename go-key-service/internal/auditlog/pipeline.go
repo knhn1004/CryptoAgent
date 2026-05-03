@@ -12,6 +12,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -184,7 +185,10 @@ func (p *Pipeline) Submit(ctx context.Context, a *action.Action, sig []byte) (*E
 	leafPayload = append(leafPayload, canon...)
 	leafPayload = append(leafPayload, sig...)
 
-	idx := p.tree.Append(leafPayload)
+	idx, err := p.tree.Append(leafPayload)
+	if err != nil {
+		return nil, false, fmt.Errorf("auditlog: tree append: %w", err)
+	}
 	ev := &Event{
 		LeafIndex:  idx,
 		LeafHash:   merkle.HashLeaf(leafPayload),
