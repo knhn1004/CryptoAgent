@@ -196,17 +196,11 @@ class TokenClient:
         if status != 204:
             raise self._error_from(status, payload)
 
-    def _do(
-        self, method: str, path: str, body: dict[str, Any] | None
-    ) -> tuple[int, bytes]:
+    def _do(self, method: str, path: str, body: dict[str, Any] | None) -> tuple[int, bytes]:
         try:
-            return self._http.request(
-                method, self._base + path, body=body, timeout=self._timeout
-            )
+            return self._http.request(method, self._base + path, body=body, timeout=self._timeout)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
-            raise TokenServiceUnavailableError(
-                f"token service unreachable: {e}"
-            ) from e
+            raise TokenServiceUnavailableError(f"token service unreachable: {e}") from e
 
     @staticmethod
     def _error_from(status: int, payload: bytes) -> TokenError:

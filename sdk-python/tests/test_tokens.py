@@ -65,9 +65,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _serve(self, method: str) -> None:
         body = self._read()
-        self.service.calls.append(
-            {"method": method, "path": self.path, "body": body}
-        )
+        self.service.calls.append({"method": method, "path": self.path, "body": body})
         status, payload = self.service.pop()
         self.send_response(status)
         if payload is None:
@@ -324,9 +322,7 @@ def test_requires_token_service_denies(fake_service):
     svc.queue(403, {"error": "expired", "message": "expired"})
 
     client = TokenClient(base)
-    fn = _make_action_decorated(
-        client, fn=lambda: pytest.fail("wrapped fn should not run")
-    )
+    fn = _make_action_decorated(client, fn=lambda: pytest.fail("wrapped fn should not run"))
     with token_context(Token.from_response(_issue_response())):
         with pytest.raises(TokenError) as info:
             fn()
@@ -338,9 +334,7 @@ def test_requires_token_fails_closed_on_5xx(fake_service):
     svc.queue(503, {"error": "internal", "message": "down"})
 
     client = TokenClient(base)
-    fn = _make_action_decorated(
-        client, fn=lambda: pytest.fail("wrapped fn should not run on 5xx")
-    )
+    fn = _make_action_decorated(client, fn=lambda: pytest.fail("wrapped fn should not run on 5xx"))
     with token_context(Token.from_response(_issue_response())):
         with pytest.raises(TokenServiceUnavailableError):
             fn()
