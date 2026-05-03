@@ -11,12 +11,15 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/action"
+	"github.com/knhn1004/CryptoAgent/go-key-service/internal/auditlog"
+	auditloghttp "github.com/knhn1004/CryptoAgent/go-key-service/internal/auditlog/http"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/keystore"
 )
 
 type Server struct {
-	store  keystore.KeyStore
-	logger *slog.Logger
+	store    keystore.KeyStore
+	pipeline *auditlog.Pipeline
+	logger   *slog.Logger
 }
 
 func NewServer(store keystore.KeyStore, logger *slog.Logger) *Server {
@@ -24,6 +27,14 @@ func NewServer(store keystore.KeyStore, logger *slog.Logger) *Server {
 		logger = slog.Default()
 	}
 	return &Server{store: store, logger: logger}
+}
+
+// WithAuditPipeline mounts the audit-log endpoints on the same router as
+// the key endpoints. Pass nil to disable; it's optional so existing
+// callers (and tests) keep working.
+func (s *Server) WithAuditPipeline(p *auditlog.Pipeline) *Server {
+	s.pipeline = p
+	return s
 }
 
 func (s *Server) Router() http.Handler {
@@ -38,6 +49,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/{agentID}", s.handleGet)
 		r.Delete("/{agentID}", s.handleDelete)
 	})
+	if s.pipeline != nil {
+		auditloghttp.Mount(r, s.pipeline, s.logger)
+	}
 	return r
 }
 
