@@ -28,5 +28,4 @@ dashboard/.vite/
 # Foundry / contracts
 contracts/cache/
 contracts/out/
-contracts/lib/
 contracts/broadcast/

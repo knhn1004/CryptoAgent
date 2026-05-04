@@ -11,6 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/action"
+	"github.com/knhn1004/CryptoAgent/go-key-service/internal/anchor"
+	anchorhttp "github.com/knhn1004/CryptoAgent/go-key-service/internal/anchor/http"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/auditlog"
 	auditloghttp "github.com/knhn1004/CryptoAgent/go-key-service/internal/auditlog/http"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/capability"
@@ -19,10 +21,11 @@ import (
 )
 
 type Server struct {
-	store      keystore.KeyStore
-	pipeline   *auditlog.Pipeline
-	capability *capability.Service
-	logger     *slog.Logger
+	store       keystore.KeyStore
+	pipeline    *auditlog.Pipeline
+	capability  *capability.Service
+	anchorStore *anchor.LatestStore
+	logger      *slog.Logger
 }
 
 func NewServer(store keystore.KeyStore, logger *slog.Logger) *Server {
@@ -47,6 +50,13 @@ func (s *Server) WithCapability(c *capability.Service) *Server {
 	return s
 }
 
+// WithAnchor mounts the on-chain anchor indexer endpoints. Optional; the
+// keyserver runs fine without it for setups that don't anchor on-chain.
+func (s *Server) WithAnchor(latest *anchor.LatestStore) *Server {
+	s.anchorStore = latest
+	return s
+}
+
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(s.logRequests)
@@ -64,6 +74,9 @@ func (s *Server) Router() http.Handler {
 	}
 	if s.capability != nil {
 		capabilityhttp.Mount(r, s.capability, s.logger)
+	}
+	if s.anchorStore != nil {
+		anchorhttp.Mount(r, s.anchorStore, s.logger)
 	}
 	return r
 }
