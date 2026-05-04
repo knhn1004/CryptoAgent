@@ -13,13 +13,16 @@ import (
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/action"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/auditlog"
 	auditloghttp "github.com/knhn1004/CryptoAgent/go-key-service/internal/auditlog/http"
+	"github.com/knhn1004/CryptoAgent/go-key-service/internal/capability"
+	capabilityhttp "github.com/knhn1004/CryptoAgent/go-key-service/internal/capability/http"
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/keystore"
 )
 
 type Server struct {
-	store    keystore.KeyStore
-	pipeline *auditlog.Pipeline
-	logger   *slog.Logger
+	store      keystore.KeyStore
+	pipeline   *auditlog.Pipeline
+	capability *capability.Service
+	logger     *slog.Logger
 }
 
 func NewServer(store keystore.KeyStore, logger *slog.Logger) *Server {
@@ -37,6 +40,13 @@ func (s *Server) WithAuditPipeline(p *auditlog.Pipeline) *Server {
 	return s
 }
 
+// WithCapability mounts the capability (token) endpoints on the same
+// router. Optional; tests that don't need tokens can omit this.
+func (s *Server) WithCapability(c *capability.Service) *Server {
+	s.capability = c
+	return s
+}
+
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(s.logRequests)
@@ -51,6 +61,9 @@ func (s *Server) Router() http.Handler {
 	})
 	if s.pipeline != nil {
 		auditloghttp.Mount(r, s.pipeline, s.logger)
+	}
+	if s.capability != nil {
+		capabilityhttp.Mount(r, s.capability, s.logger)
 	}
 	return r
 }

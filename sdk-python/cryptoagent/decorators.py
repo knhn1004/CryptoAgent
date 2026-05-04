@@ -3,7 +3,9 @@
 * :func:`signed_action` — sign every invocation and attach the signed
   action + signature to a thread-local context downstream consumers can
   read via :func:`current_signed_action`.
-* :func:`requires_capability` — gate a call on an ACL membership check.
+* :func:`requires_capability` — gate a call on an in-memory ACL check.
+* :func:`requires_token` — gate a call on a service-issued scoped token,
+  verified by the Go service. Fail-closed.
 * :func:`multi_sig` — route a call through a :class:`Gate` so it is only
   executed when ``threshold`` distinct valid signers approved it.
 """
@@ -20,6 +22,7 @@ from .acl import ACL
 from .action import Action
 from .multisig import Gate
 from .signing import sign
+from .tokens import TokenClient, TokenError, current_token
 
 _context = threading.local()
 
@@ -104,6 +107,48 @@ def requires_capability(
             if agent_id_arg not in kwargs:
                 raise TypeError(f"@requires_capability needs kwarg {agent_id_arg!r}")
             acl.require(kwargs[agent_id_arg], capability)
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return deco
+
+
+def requires_token(
+    client: TokenClient,
+    *,
+    action_type: str,
+    target: str,
+) -> Callable:
+    """Reject the call unless the active token authorizes
+    ``(action_type, target)`` for the calling agent.
+
+    Reads the active :class:`~cryptoagent.tokens.Token` from the
+    :func:`~cryptoagent.tokens.token_context` and the calling agent_id
+    from the surrounding ``@signed_action`` context, then asks the
+    service to verify. Any non-200 response (including network errors)
+    aborts the call — this is the security gate, fail-closed.
+
+    Must be applied *inside* ``@signed_action`` so the agent_id is
+    available.
+    """
+
+    def deco(fn: Callable) -> Callable:
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            ctx = current_signed_action()
+            if ctx is None:
+                raise TokenError("@requires_token must be inside @signed_action")
+            action, _ = ctx
+            token = current_token()
+            if token is None:
+                raise TokenError("no active token in context")
+            client.verify(
+                token,
+                action_type=action_type,
+                target=target,
+                agent_id=action.agent_id,
+            )
             return fn(*args, **kwargs)
 
         return wrapper
