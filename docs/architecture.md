@@ -78,7 +78,15 @@ between the live tree and on-chain commits to detect rewrites.
    signs it with the agent's private key (loaded from key-service or
    a local secret).
 3. `@requires_capability` checks the ACL by `agent_id`; missing
-   capability → `CapabilityError`.
+   capability → `CapabilityError`. For scoped enforcement,
+   `@requires_token` posts the active `Token` to the Go service's
+   `/v1/tokens/verify` endpoint (server-authoritative, fail-closed on
+   5xx) and only proceeds on `200 OK`. When an `UnauthorizedMetrics`
+   instance is bound to the decorator, every rejection — server-issued
+   (`expired`, `revoked`, `agent_mismatch`, `action_type_not_allowed`,
+   `target_not_allowed`) and client-side (missing context, unreachable
+   service) — increments the per-action-type counter the dashboard
+   reads as "unauthorized attempts".
 4. Co-approvers (or a quorum service) sign the same canonical bytes.
 5. Caller invokes `gate.execute(action, signatures, fn, ...)`. The gate
    verifies each signature, counts unique valid signers, compares to

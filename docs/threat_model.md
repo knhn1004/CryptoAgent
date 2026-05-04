@@ -38,7 +38,7 @@ the underlying Ed25519 primitive.
 | T1 | Action attribution: actor unknown after the fact | Every action carries an Ed25519 signature over canonical bytes. `verify(action, sig, pub)` recovers the signer. |
 | T2 | Action replay (same signed bytes resubmitted) | `(agent_id, nonce)` cache + `±30 s` timestamp window per `docs/schema.md`. |
 | T3 | Cross-language signature drift | `docs/signing_vectors.json` fixture, asserted by Go and Python tests. |
-| T4 | Privilege escalation by an agent | `@requires_capability` against an `ACL`. |
+| T4 | Privilege escalation by an agent | `@requires_capability` against an `ACL` for coarse capability strings, or `@requires_token` against a server-issued, server-verified scoped token (`TokenClient` → Go `/v1/tokens/verify`) for `(agent_id, action_type, target)` + expiry + revocation; orchestrator side increments `UnauthorizedMetrics` per action_type for the success-metric counter. |
 | T5 | Single-agent unilateral action on critical operations | `Gate` enforces t-of-n distinct valid signers; `ThresholdNotMetError` on violation. |
 | T6 | Bypassing the gate by calling the function directly | `@gated` invariant decorator: direct call → `BypassError` and `gate.bypass_metrics()` increments. |
 | T7 | Silent rewrite of the audit log | RFC 6962 Merkle tree + consistency proofs. `Verifier.VerifyHistoricalRoot` flags any in-range tamper with a hex-bearing diagnostic. |

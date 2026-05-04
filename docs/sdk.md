@@ -86,6 +86,39 @@ def read_secret(name: str, *, agent_id: str) -> str:
 The agent id is read from `kwargs["agent_id"]` by default; pass
 `agent_id_arg="..."` to change the name.
 
+## Orchestrator metric: `UnauthorizedMetrics`
+
+`@requires_token` (the server-authoritative decorator from the
+preceding section) takes an optional `metrics: UnauthorizedMetrics`
+kwarg. Every rejection — whether the Go service returned
+`expired`/`revoked`/`agent_mismatch`/`action_type_not_allowed`/
+`target_not_allowed`, or the SDK rejected client-side
+(missing token context, unreachable service) — increments a counter
+keyed by the decorator's `action_type`. The decorator's
+authoritative decision is unchanged; metrics only observe.
+
+```python
+from cryptoagent import (
+    UnauthorizedMetrics, requires_token, signed_action, token_context,
+)
+
+metrics = UnauthorizedMetrics()
+
+@signed_action(agent_id="alice", action_type="transfer_funds",
+               target="vault/treasury", private_key=alice_priv)
+@requires_token(client, action_type="transfer_funds",
+                target="vault/treasury", metrics=metrics)
+def transfer(amount: int) -> str:
+    ...
+
+# After traffic has run:
+metrics.count("transfer_funds")    # int
+metrics.snapshot()                 # {action_type: count}
+```
+
+This counter is the success-metric input from the proposal — the
+dashboard reads it as "out-of-scope action rejections per type".
+
 ## Decorator: `@multi_sig` (and the `Gate`)
 
 For *critical* actions, the SDK enforces a t-of-n threshold of distinct

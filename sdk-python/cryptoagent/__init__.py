@@ -2,7 +2,7 @@
 LangChain wrapper. See ``examples/langchain_agent.py`` for end-to-end
 usage."""
 
-from .acl import ACL, CapabilityError
+from .acl import ACL, CapabilityError, UnauthorizedMetrics
 from .action import (
     MAX_SKEW_MS,
     NONCE_HEX_LEN,
@@ -80,6 +80,7 @@ __all__ = [
     "TokenClient",
     "TokenError",
     "TokenServiceUnavailableError",
+    "UnauthorizedMetrics",
     "clear_token",
     "current_signed_action",
     "current_token",
