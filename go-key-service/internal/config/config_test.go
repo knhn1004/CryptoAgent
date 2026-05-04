@@ -1,7 +1,10 @@
 package config
 
 import (
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -100,5 +103,41 @@ func TestAnchorRejectsUnknownMode(t *testing.T) {
 	t.Setenv("ANCHOR_MODE", "lunar")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected error on unknown anchor mode")
+	}
+}
+
+func TestSecretRedactsInString(t *testing.T) {
+	s := Secret("0xdeadbeef")
+	if got := s.String(); got == "0xdeadbeef" {
+		t.Errorf("String() leaked the secret: %q", got)
+	}
+	if got := fmt.Sprintf("%v", s); strings.Contains(got, "deadbeef") {
+		t.Errorf("%%v leaked the secret: %q", got)
+	}
+	if got := fmt.Sprintf("%#v", s); strings.Contains(got, "deadbeef") {
+		t.Errorf("%%#v leaked the secret: %q", got)
+	}
+	if Secret("").String() != "" {
+		t.Errorf("empty secret should stringify as empty")
+	}
+}
+
+func TestSecretRedactsInJSON(t *testing.T) {
+	type holder struct {
+		Key Secret `json:"key"`
+	}
+	out, err := json.Marshal(holder{Key: Secret("0xdeadbeef")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "deadbeef") {
+		t.Errorf("MarshalJSON leaked the secret: %s", out)
+	}
+}
+
+func TestSecretReveal(t *testing.T) {
+	s := Secret("0xdeadbeef")
+	if s.Reveal() != "0xdeadbeef" {
+		t.Errorf("Reveal() should return raw value")
 	}
 }

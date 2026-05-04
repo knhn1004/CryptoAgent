@@ -113,7 +113,7 @@ func buildAnchorClient(cfg config.Config) (anchor.EVMClient, error) {
 		return anchor.NewCastClient(anchor.CastClientConfig{
 			ContractAddress: cfg.AnchorContractAddress,
 			RPCURL:          cfg.AnchorRPCURL,
-			PrivateKey:      cfg.AnchorPrivateKey,
+			PrivateKey:      cfg.AnchorPrivateKey.Reveal(),
 			CastBinary:      cfg.AnchorCastBinary,
 		})
 	default:

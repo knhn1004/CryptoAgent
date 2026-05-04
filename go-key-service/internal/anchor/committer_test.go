@@ -17,8 +17,7 @@ type fakeTree struct {
 	root []byte
 }
 
-func (f *fakeTree) Size() uint64 { return f.size }
-func (f *fakeTree) Root() []byte  { return f.root }
+func (f *fakeTree) Snapshot() (uint64, []byte) { return f.size, f.root }
 
 func newRoot(b byte) []byte {
 	out := make([]byte, HashSize)
@@ -154,7 +153,10 @@ func TestCommitOnce_GrowingTreeProducesNewAnchors(t *testing.T) {
 	if got := client.Calls(); got != 2 {
 		t.Errorf("expected 2 commits, got %d", got)
 	}
-	last, _ := store.Latest()
+	last, err := store.Latest()
+	if err != nil {
+		t.Fatalf("store.Latest: %v", err)
+	}
 	if last.TreeSize != 9 {
 		t.Errorf("latest size: got %d want 9", last.TreeSize)
 	}

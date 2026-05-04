@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -32,8 +33,10 @@ type Committer struct {
 
 	lastCommitted atomic.Uint64
 
-	stop chan struct{}
-	done chan struct{}
+	startOnce sync.Once
+	stopOnce  sync.Once
+	stop      chan struct{}
+	done      chan struct{}
 }
 
 // CommitterOptions configures a Committer; zero values get sensible
@@ -83,16 +86,20 @@ func NewCommitter(tree TreeView, client EVMClient, store *LatestStore, opts Comm
 	}, nil
 }
 
-// Start launches the polling goroutine. Calling Start more than once
-// panics — committers are not reusable.
+// Start launches the polling goroutine. Idempotent: subsequent calls
+// are no-ops, so wiring code that fans Start out to multiple lifecycle
+// hooks won't spawn rogue committers.
 func (c *Committer) Start(ctx context.Context) {
-	go c.loop(ctx)
+	c.startOnce.Do(func() {
+		go c.loop(ctx)
+	})
 }
 
 // Stop signals the loop to exit and waits up to `timeout` for the
-// goroutine to drain. Returns true on clean exit.
+// goroutine to drain. Returns true on clean exit. Idempotent: a
+// retried Stop after a timeout will not panic on a closed channel.
 func (c *Committer) Stop(timeout time.Duration) bool {
-	close(c.stop)
+	c.stopOnce.Do(func() { close(c.stop) })
 	select {
 	case <-c.done:
 		return true
@@ -141,11 +148,12 @@ func (c *Committer) loop(ctx context.Context) {
 // ErrEmptyTree are returned (not logged) so the caller can treat them
 // as non-events.
 func (c *Committer) commit(ctx context.Context) (Anchor, bool, error) {
-	size := c.tree.Size()
-	if size == 0 {
+	rawSize, rawRoot := c.tree.Snapshot()
+	if rawSize == 0 {
 		return Anchor{}, false, ErrEmptyTree
 	}
-	root := append([]byte(nil), c.tree.Root()...)
+	size := rawSize
+	root := append([]byte(nil), rawRoot...)
 	if err := validateCommit(size, root); err != nil {
 		return Anchor{}, false, err
 	}

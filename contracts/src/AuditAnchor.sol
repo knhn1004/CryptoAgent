@@ -25,6 +25,16 @@ contract AuditAnchor {
         uint256 indexed id, uint64 treeSize, bytes32 indexed root, uint64 blockNumber, uint64 timestamp
     );
 
+    /// @notice Emitted when the committer rotates. Both addresses indexed
+    ///         so observers can filter by either side of the swap.
+    event CommitterChanged(address indexed previous, address indexed next);
+
+    /// @notice Emitted when a two-step ownership handover begins.
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
+
+    /// @notice Emitted when the pending owner accepts ownership.
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
     /// @notice Owner administers the committer set; cannot itself commit.
     address public owner;
     address public pendingOwner;
@@ -98,19 +108,23 @@ contract AuditAnchor {
     /// @notice Rotate the committer. Owner-only; effective immediately.
     function setCommitter(address next) external onlyOwner {
         if (next == address(0)) revert ZeroAddress();
+        emit CommitterChanged(committer, next);
         committer = next;
     }
 
     /// @notice Begin a two-step ownership handover.
     function transferOwnership(address next) external onlyOwner {
         if (next == address(0)) revert ZeroAddress();
+        emit OwnershipTransferStarted(owner, next);
         pendingOwner = next;
     }
 
     /// @notice Pending owner accepts.
     function acceptOwnership() external {
         if (msg.sender != pendingOwner) revert NotPendingOwner();
+        address previous = owner;
         owner = pendingOwner;
         pendingOwner = address(0);
+        emit OwnershipTransferred(previous, owner);
     }
 }

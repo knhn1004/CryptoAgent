@@ -95,6 +95,15 @@ func (t *Tree) Root() []byte {
 	return mth(t.leaves)
 }
 
+// Snapshot returns the current `(size, root)` pair under a single
+// read lock, so callers (notably the on-chain anchor committer) get a
+// consistent view even when appends are happening concurrently.
+func (t *Tree) Snapshot() (uint64, []byte) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return uint64(len(t.leaves)), mth(t.leaves)
+}
+
 // RootAt returns the root of the tree's first `size` leaves.
 func (t *Tree) RootAt(size uint64) ([]byte, error) {
 	t.mu.RLock()

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -84,16 +85,21 @@ func (f *FakeEVMClient) Commit(_ context.Context, treeSize uint64, root []byte, 
 // the process env at construction time so the broadcaster never logs
 // the private key.
 //
+// The private key is passed to `cast` via the ETH_PRIVATE_KEY env var
+// (which `cast send` accepts as a fallback when --private-key is
+// absent), not via the command line. That keeps the secret out of
+// `ps aux`, /proc/<pid>/cmdline, and shell history files.
+//
 // The contract ABI we target:
 //
 //	function commit(uint64 treeSize, bytes32 root, uint64 timestamp)
 //	    external returns (uint256 id);
 type CastClient struct {
-	contract     string // 0x… address of the deployed AuditAnchor
-	rpcURL       string
-	privateKey   string // hex (0x-prefixed); never logged
-	castBin      string // path to `cast` binary; "cast" if on PATH
-	commandRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
+	contract      string // 0x… address of the deployed AuditAnchor
+	rpcURL        string
+	privateKey    string // hex (0x-prefixed); never logged or argv-passed
+	castBin       string // path to `cast` binary; "cast" if on PATH
+	commandRunner func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 }
 
 // CastClientConfig carries the wiring CastClient needs.
@@ -138,19 +144,25 @@ func (c *CastClient) Commit(ctx context.Context, treeSize uint64, root []byte, t
 	if err := validateCommit(treeSize, root); err != nil {
 		return CommitReceipt{}, err
 	}
+	unix := ts.Unix()
+	if unix < 0 {
+		return CommitReceipt{}, fmt.Errorf("anchor: timestamp before unix epoch (%d)", unix)
+	}
 	rootHex := "0x" + hex.EncodeToString(root)
 	args := []string{
 		"send",
 		"--rpc-url", c.rpcURL,
-		"--private-key", c.privateKey,
 		"--json",
 		c.contract,
 		"commit(uint64,bytes32,uint64)",
 		strconv.FormatUint(treeSize, 10),
 		rootHex,
-		strconv.FormatInt(ts.Unix(), 10),
+		strconv.FormatUint(uint64(unix), 10),
 	}
-	out, err := c.commandRunner(ctx, c.castBin, args...)
+	// cast reads ETH_PRIVATE_KEY when --private-key is absent. Passing
+	// it via env keeps the secret out of /proc/<pid>/cmdline.
+	env := []string{"ETH_PRIVATE_KEY=" + c.privateKey}
+	out, err := c.commandRunner(ctx, env, c.castBin, args...)
 	if err != nil {
 		return CommitReceipt{}, fmt.Errorf("cast send: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
@@ -161,6 +173,11 @@ func (c *CastClient) Commit(ctx context.Context, treeSize uint64, root []byte, t
 	return receipt, nil
 }
 
-func defaultCastRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+func defaultCastRunner(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	// Inherit the parent env so cast still sees PATH, HOME, etc., but
+	// override / add the secret-bearing entries from `env` last so
+	// they take precedence over anything inherited.
+	cmd.Env = append(append([]string(nil), os.Environ()...), env...)
+	return cmd.CombinedOutput()
 }

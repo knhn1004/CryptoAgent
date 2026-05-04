@@ -9,6 +9,34 @@ import (
 	"time"
 )
 
+// Secret is a string that hides its contents in String() / MarshalJSON
+// outputs. Use it for fields that hold credentials so accidental log
+// lines or JSON dumps of Config don't leak the value.
+type Secret string
+
+// String redacts the secret. The raw value is retrieved with Reveal.
+func (s Secret) String() string {
+	if s == "" {
+		return ""
+	}
+	return "[REDACTED]"
+}
+
+// GoString redacts the secret in fmt's %#v form too.
+func (s Secret) GoString() string { return s.String() }
+
+// MarshalJSON redacts on JSON marshal.
+func (s Secret) MarshalJSON() ([]byte, error) {
+	if s == "" {
+		return []byte(`""`), nil
+	}
+	return []byte(`"[REDACTED]"`), nil
+}
+
+// Reveal returns the underlying value. Call only when handing the
+// secret to the consumer (e.g. the anchor client constructor).
+func (s Secret) Reveal() string { return string(s) }
+
 // AnchorMode controls the anchor committer wiring.
 type AnchorMode string
 
@@ -32,7 +60,7 @@ type Config struct {
 	AnchorInterval        time.Duration
 	AnchorContractAddress string
 	AnchorRPCURL          string
-	AnchorPrivateKey      string
+	AnchorPrivateKey      Secret
 	AnchorCastBinary      string
 }
 
@@ -66,7 +94,7 @@ func Load() (Config, error) {
 	case AnchorCast:
 		cfg.AnchorContractAddress = os.Getenv("ANCHOR_CONTRACT_ADDRESS")
 		cfg.AnchorRPCURL = os.Getenv("ANCHOR_RPC_URL")
-		cfg.AnchorPrivateKey = os.Getenv("ANCHOR_PRIVATE_KEY")
+		cfg.AnchorPrivateKey = Secret(os.Getenv("ANCHOR_PRIVATE_KEY"))
 		cfg.AnchorCastBinary = os.Getenv("ANCHOR_CAST_BINARY")
 		if cfg.AnchorContractAddress == "" || cfg.AnchorRPCURL == "" || cfg.AnchorPrivateKey == "" {
 			return Config{}, fmt.Errorf(

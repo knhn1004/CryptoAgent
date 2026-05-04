@@ -47,12 +47,13 @@ func (a Anchor) RootHex() string {
 }
 
 // TreeView is the producer side: anything that can report the current
-// (size, root) of the live Merkle tree. Implemented by *merkle.Tree
-// directly (Size + Root); kept as an interface so tests can drive the
-// committer with canned values.
+// (size, root) of the live Merkle tree atomically. Implemented by
+// *merkle.Tree directly (Snapshot); kept as an interface so tests can
+// drive the committer with canned values. Snapshot must return both
+// fields under the same lock — committing a size that doesn't match
+// the root corrupts the on-chain audit trail.
 type TreeView interface {
-	Size() uint64
-	Root() []byte
+	Snapshot() (size uint64, root []byte)
 }
 
 // EVMClient is the broadcaster contract. Real impls turn the call into

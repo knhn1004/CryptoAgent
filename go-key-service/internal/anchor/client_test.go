@@ -93,10 +93,12 @@ func TestCastClient_BuildsCommandAndParsesReceipt(t *testing.T) {
 	var got struct {
 		bin  string
 		args []string
+		env  []string
 	}
-	c.commandRunner = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	c.commandRunner = func(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
 		got.bin = name
 		got.args = append(got.args, args...)
+		got.env = append(got.env, env...)
 		return []byte(`{"transactionHash":"0xdead","blockNumber":"0x1a"}`), nil
 	}
 
@@ -110,6 +112,23 @@ func TestCastClient_BuildsCommandAndParsesReceipt(t *testing.T) {
 	// First arg is the subcommand.
 	if got.args[0] != "send" {
 		t.Errorf("first arg: got %q want send", got.args[0])
+	}
+	// Private key must NOT appear on the command line.
+	for _, a := range got.args {
+		if strings.Contains(a, c.privateKey) || a == "--private-key" {
+			t.Errorf("private key leaked into argv: %q", a)
+		}
+	}
+	// It must be passed via ETH_PRIVATE_KEY env instead.
+	wantEnv := "ETH_PRIVATE_KEY=" + c.privateKey
+	found := false
+	for _, e := range got.env {
+		if e == wantEnv {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ETH_PRIVATE_KEY not passed via env: %v", got.env)
 	}
 	// Last three args are the abi-encoded calldata.
 	n := len(got.args)
@@ -139,7 +158,7 @@ func TestCastClient_RejectsBadInputs(t *testing.T) {
 		RPCURL:          "http://localhost:8545",
 		PrivateKey:      "0xab",
 	})
-	c.commandRunner = func(context.Context, string, ...string) ([]byte, error) {
+	c.commandRunner = func(context.Context, []string, string, ...string) ([]byte, error) {
 		t.Fatal("commandRunner should not be invoked on validation failure")
 		return nil, nil
 	}
@@ -151,13 +170,30 @@ func TestCastClient_RejectsBadInputs(t *testing.T) {
 	}
 }
 
+func TestCastClient_RejectsNegativeTimestamp(t *testing.T) {
+	c, _ := NewCastClient(CastClientConfig{
+		ContractAddress: "0xCAFE",
+		RPCURL:          "http://localhost:8545",
+		PrivateKey:      "0xab",
+	})
+	c.commandRunner = func(context.Context, []string, string, ...string) ([]byte, error) {
+		t.Fatal("commandRunner should not be invoked on negative ts")
+		return nil, nil
+	}
+	preEpoch := time.Date(1969, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, err := c.Commit(context.Background(), 1, newRoot(0xa1), preEpoch)
+	if err == nil || !strings.Contains(err.Error(), "before unix epoch") {
+		t.Errorf("expected pre-epoch error, got %v", err)
+	}
+}
+
 func TestCastClient_SurfacesCastFailure(t *testing.T) {
 	c, _ := NewCastClient(CastClientConfig{
 		ContractAddress: "0xCAFE",
 		RPCURL:          "http://localhost:8545",
 		PrivateKey:      "0xab",
 	})
-	c.commandRunner = func(context.Context, string, ...string) ([]byte, error) {
+	c.commandRunner = func(context.Context, []string, string, ...string) ([]byte, error) {
 		return []byte("revert: TreeShrank"), errors.New("exit 1")
 	}
 	_, err := c.Commit(context.Background(), 1, newRoot(0xa1), time.Now())

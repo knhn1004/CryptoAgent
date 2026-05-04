@@ -17,6 +17,9 @@ contract AuditAnchorTest is Test {
     event AuditAnchored(
         uint256 indexed id, uint64 treeSize, bytes32 indexed root, uint64 blockNumber, uint64 timestamp
     );
+    event CommitterChanged(address indexed previous, address indexed next);
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     function setUp() public {
         vm.prank(owner);
@@ -140,5 +143,32 @@ contract AuditAnchorTest is Test {
         vm.prank(committer);
         vm.expectRevert(AuditAnchor.NotOwner.selector);
         anchor.setCommitter(committer);
+    }
+
+    function test_setCommitter_emits_event() public {
+        address next = address(0xCAFE);
+        vm.expectEmit(true, true, true, true);
+        emit CommitterChanged(committer, next);
+        vm.prank(owner);
+        anchor.setCommitter(next);
+    }
+
+    function test_transferOwnership_emits_event() public {
+        address next = address(0xFEED);
+        vm.expectEmit(true, true, true, true);
+        emit OwnershipTransferStarted(owner, next);
+        vm.prank(owner);
+        anchor.transferOwnership(next);
+    }
+
+    function test_acceptOwnership_emits_event() public {
+        address next = address(0xFEED);
+        vm.prank(owner);
+        anchor.transferOwnership(next);
+
+        vm.expectEmit(true, true, true, true);
+        emit OwnershipTransferred(owner, next);
+        vm.prank(next);
+        anchor.acceptOwnership();
     }
 }
