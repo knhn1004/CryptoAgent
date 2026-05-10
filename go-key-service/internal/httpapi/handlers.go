@@ -25,7 +25,16 @@ type Server struct {
 	pipeline    *auditlog.Pipeline
 	capability  *capability.Service
 	anchorStore *anchor.LatestStore
+	tree        merkleHead
 	logger      *slog.Logger
+	corsOrigins []string
+}
+
+// merkleHead is the minimum surface needed to serve GET
+// /v1/merkle/head: the live tree's (size, root). Decoupled as an
+// interface so tests can stub it without spinning up a Tree.
+type merkleHead interface {
+	Snapshot() (uint64, []byte)
 }
 
 func NewServer(store keystore.KeyStore, logger *slog.Logger) *Server {
@@ -57,8 +66,28 @@ func (s *Server) WithAnchor(latest *anchor.LatestStore) *Server {
 	return s
 }
 
+// WithMerkleTree exposes GET /v1/merkle/head — the live tree (size,
+// root) that the dashboard reads to render the current Merkle head
+// without waiting for the next on-chain anchor.
+func (s *Server) WithMerkleTree(t merkleHead) *Server {
+	s.tree = t
+	return s
+}
+
+// WithCORS enables permissive CORS on the listed origins (e.g.
+// http://localhost:5173 for the Vite dev server). Empty list disables
+// CORS — the production deployment serves dashboard + key-service from
+// the same origin.
+func (s *Server) WithCORS(origins []string) *Server {
+	s.corsOrigins = append([]string(nil), origins...)
+	return s
+}
+
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
+	if len(s.corsOrigins) > 0 {
+		r.Use(s.cors)
+	}
 	r.Use(s.logRequests)
 	r.Get("/health", s.handleHealth)
 	r.Route("/v1/keys", func(r chi.Router) {
@@ -69,6 +98,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/{agentID}", s.handleGet)
 		r.Delete("/{agentID}", s.handleDelete)
 	})
+	if s.tree != nil {
+		r.Get("/v1/merkle/head", s.handleMerkleHead)
+	}
 	if s.pipeline != nil {
 		auditloghttp.Mount(r, s.pipeline, s.logger)
 	}
@@ -79,6 +111,17 @@ func (s *Server) Router() http.Handler {
 		anchorhttp.Mount(r, s.anchorStore, s.logger)
 	}
 	return r
+}
+
+// handleMerkleHead returns the live tree's current (size, root). The
+// dashboard reads this for the "current root" tile; auditors who want
+// historical consistency proofs use POST /v1/merkle/verify.
+func (s *Server) handleMerkleHead(w http.ResponseWriter, _ *http.Request) {
+	size, root := s.tree.Snapshot()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"size":     size,
+		"root_hex": "0x" + hex.EncodeToString(root),
+	})
 }
 
 type errorEnvelope struct {
@@ -218,6 +261,45 @@ type statusRecorder struct {
 func (sr *statusRecorder) WriteHeader(s int) {
 	sr.status = s
 	sr.ResponseWriter.WriteHeader(s)
+}
+
+// Flush forwards to the underlying writer's Flush so the SSE handler's
+// `w.(http.Flusher)` assertion still succeeds when it goes through
+// this middleware. Without this, /v1/audit/events fails with
+// "streaming unsupported" once logRequests wraps the writer.
+func (sr *statusRecorder) Flush() {
+	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// cors is a minimal CORS middleware sized for dashboard dev: it
+// reflects the request Origin only when it matches the configured
+// allowlist, supports preflight, and exposes the headers the SSE
+// client actually needs. Production with a same-origin deployment
+// should not enable this.
+func (s *Server) cors(next http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(s.corsOrigins))
+	for _, o := range s.corsOrigins {
+		allowed[o] = struct{}{}
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			if _, ok := allowed[origin]; ok {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+				w.Header().Set("Access-Control-Max-Age", "300")
+			}
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) logRequests(next http.Handler) http.Handler {

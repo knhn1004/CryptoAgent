@@ -121,15 +121,16 @@ func (h *handler) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	// Replay backlog first. Track the highest delivered index so we can
+	// Replay backlog first. Track the highest delivered Seq so we can
 	// suppress duplicates that may have arrived between EventsSince and
-	// Subscribe.
+	// Subscribe. Seq is monotonic across both appended and rejected
+	// events, unlike LeafIndex which only applies to successful appends.
 	var lastSent int64 = int64(since) - 1
-	for _, ev := range h.p.EventsSince(since) {
+	for _, ev := range h.p.AllEventsSince(since) {
 		if err := writeSSE(w, ev); err != nil {
 			return
 		}
-		lastSent = int64(ev.LeafIndex)
+		lastSent = int64(ev.Seq)
 	}
 	flusher.Flush()
 
@@ -142,13 +143,13 @@ func (h *handler) stream(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if int64(ev.LeafIndex) <= lastSent {
+			if int64(ev.Seq) <= lastSent {
 				continue
 			}
 			if err := writeSSE(w, ev); err != nil {
 				return
 			}
-			lastSent = int64(ev.LeafIndex)
+			lastSent = int64(ev.Seq)
 			flusher.Flush()
 		}
 	}
@@ -159,7 +160,7 @@ func writeSSE(w http.ResponseWriter, ev auditlog.Event) error {
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "id: %d\ndata: %s\n\n", ev.LeafIndex, b); err != nil {
+	if _, err := fmt.Fprintf(w, "id: %d\ndata: %s\n\n", ev.Seq, b); err != nil {
 		return err
 	}
 	return nil

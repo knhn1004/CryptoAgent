@@ -5,6 +5,13 @@
 //
 // Per docs/schema.md, the leaf payload is canonical(action) || signature
 // and the replay window is 30 s skew + 600 s nonce window.
+//
+// The pipeline emits two kinds of Events on its subscriber fan-out:
+// "appended" for successfully verified actions that grew the Merkle
+// tree, and "rejected" for actions that failed verification (or were
+// denied by an external policy check, e.g. the capability service).
+// Rejections never touch the tree; they exist purely so the dashboard
+// can render real-time security highlights without a second feed.
 package auditlog
 
 import (
@@ -31,21 +38,69 @@ var (
 	ErrInvalidSignature = signing.ErrInvalidSignature
 )
 
+// Event kinds emitted on the subscriber fan-out and persisted in the
+// in-memory append log. Wire format keeps these as plain strings.
+const (
+	KindAppended = "appended"
+	KindRejected = "rejected"
+)
+
 // Event is the indexed record emitted to subscribers and persisted in
 // the in-memory append log. JSON tags match the dashboard contract.
+//
+// For Kind=="appended": LeafIndex, LeafHash, Action, Signature,
+// PublicKey are all populated and the leaf is part of the Merkle tree.
+//
+// For Kind=="rejected": LeafHash/Signature/PublicKey are nil, LeafIndex
+// is zero, Action may be nil (denials from non-Submit paths know only
+// agent_id/action_type/target), and Reason carries a short stable code.
 type Event struct {
+	Seq        uint64            `json:"seq"`
+	Kind       string            `json:"kind"`
 	LeafIndex  uint64            `json:"leaf_index"`
 	LeafHash   []byte            `json:"leaf_hash"`
-	Action     *action.Action    `json:"action"`
+	Action     *action.Action    `json:"action,omitempty"`
 	Signature  []byte            `json:"signature"`
 	PublicKey  ed25519.PublicKey `json:"public_key"`
+	AgentID    string            `json:"agent_id,omitempty"`
+	ActionType string            `json:"action_type,omitempty"`
+	Target     string            `json:"target,omitempty"`
+	Reason     string            `json:"reason,omitempty"`
 	RecordedAt time.Time         `json:"recorded_at"`
 }
 
 // MarshalJSON encodes the byte slices as hex so the dashboard can render
-// them without an extra base64 step.
+// them without an extra base64 step. Branches on Kind so rejected events
+// don't carry empty leaf_hash/signature/public_key fields.
 func (e Event) MarshalJSON() ([]byte, error) {
+	if e.Kind == KindRejected {
+		return json.Marshal(struct {
+			Seq        uint64         `json:"seq"`
+			Kind       string         `json:"kind"`
+			Action     *action.Action `json:"action,omitempty"`
+			AgentID    string         `json:"agent_id,omitempty"`
+			ActionType string         `json:"action_type,omitempty"`
+			Target     string         `json:"target,omitempty"`
+			Reason     string         `json:"reason"`
+			RecordedAt time.Time      `json:"recorded_at"`
+		}{
+			Seq:        e.Seq,
+			Kind:       KindRejected,
+			Action:     e.Action,
+			AgentID:    e.AgentID,
+			ActionType: e.ActionType,
+			Target:     e.Target,
+			Reason:     e.Reason,
+			RecordedAt: e.RecordedAt,
+		})
+	}
+	kind := e.Kind
+	if kind == "" {
+		kind = KindAppended
+	}
 	return json.Marshal(struct {
+		Seq        uint64         `json:"seq"`
+		Kind       string         `json:"kind"`
 		LeafIndex  uint64         `json:"leaf_index"`
 		LeafHash   string         `json:"leaf_hash"`
 		Action     *action.Action `json:"action"`
@@ -53,6 +108,8 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		PublicKey  string         `json:"public_key"`
 		RecordedAt time.Time      `json:"recorded_at"`
 	}{
+		Seq:        e.Seq,
+		Kind:       kind,
 		LeafIndex:  e.LeafIndex,
 		LeafHash:   hexEncode(e.LeafHash),
 		Action:     e.Action,
@@ -134,32 +191,41 @@ func New(tree *merkle.Tree, store keystore.KeyStore, opts ...Option) *Pipeline {
 // Submit verifies and appends the action. The bool return is true when
 // a new leaf was appended, false when the call hit the idempotency cache
 // (in which case the cached Event is returned with a nil error).
+//
+// Every error path before return also broadcasts a Kind=="rejected"
+// Event, so dashboard subscribers see denials in real time alongside
+// successful appends.
 func (p *Pipeline) Submit(ctx context.Context, a *action.Action, sig []byte) (*Event, bool, error) {
 	if a == nil {
 		return nil, false, ErrSchemaVersion
 	}
 
 	if a.SchemaVersion != action.SchemaVersion {
+		p.recordRejectionFromAction(a, "schema_version")
 		return nil, false, ErrSchemaVersion
 	}
 	if err := a.Validate(); err != nil {
+		p.recordRejectionFromAction(a, rejectionReasonForValidate(err))
 		return nil, false, err
 	}
 
 	now := p.now()
 	if skew := absInt64(now.UnixMilli() - a.TimestampMs); skew > action.MaxSkewMillis {
+		p.recordRejectionFromAction(a, "timestamp_skew")
 		return nil, false, ErrTimestampSkew
 	}
 
 	pub, _, err := p.store.Get(ctx, a.AgentID)
 	if err != nil {
 		if errors.Is(err, keystore.ErrNotFound) {
+			p.recordRejectionFromAction(a, "unknown_agent")
 			return nil, false, ErrUnknownAgent
 		}
 		return nil, false, err
 	}
 
 	if err := signing.Verify(a, sig, pub); err != nil {
+		p.recordRejectionFromAction(a, "invalid_signature")
 		return nil, false, err
 	}
 
@@ -190,6 +256,7 @@ func (p *Pipeline) Submit(ctx context.Context, a *action.Action, sig []byte) (*E
 		return nil, false, fmt.Errorf("auditlog: tree append: %w", err)
 	}
 	ev := &Event{
+		Kind:       KindAppended,
 		LeafIndex:  idx,
 		LeafHash:   merkle.HashLeaf(leafPayload),
 		Action:     copyAction(a),
@@ -199,6 +266,7 @@ func (p *Pipeline) Submit(ctx context.Context, a *action.Action, sig []byte) (*E
 	}
 	p.seen[key] = ev
 	p.events = append(p.events, ev)
+	ev.Seq = uint64(len(p.events) - 1)
 
 	for _, ch := range p.subs {
 		select {
@@ -209,6 +277,66 @@ func (p *Pipeline) Submit(ctx context.Context, a *action.Action, sig []byte) (*E
 	}
 
 	return ev, true, nil
+}
+
+// RecordRejection logs an externally-detected denial — for example, a
+// capability/token verify failure handled by a different service. The
+// rejection is broadcast to subscribers and persisted in EventsSince.
+func (p *Pipeline) RecordRejection(agentID, actionType, target, reason string) {
+	ev := &Event{
+		Kind:       KindRejected,
+		AgentID:    agentID,
+		ActionType: actionType,
+		Target:     target,
+		Reason:     reason,
+		RecordedAt: p.now(),
+	}
+	p.publish(ev)
+}
+
+// recordRejectionFromAction is the internal Submit-path emitter. It
+// pulls agent_id/action_type/target off the parsed action so dashboard
+// rows still identify the actor.
+func (p *Pipeline) recordRejectionFromAction(a *action.Action, reason string) {
+	ev := &Event{
+		Kind:       KindRejected,
+		Action:     copyAction(a),
+		AgentID:    a.AgentID,
+		ActionType: a.ActionType,
+		Target:     a.Target,
+		Reason:     reason,
+		RecordedAt: p.now(),
+	}
+	p.publish(ev)
+}
+
+func (p *Pipeline) publish(ev *Event) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, ev)
+	ev.Seq = uint64(len(p.events) - 1)
+	for _, ch := range p.subs {
+		select {
+		case ch <- *ev:
+		default:
+		}
+	}
+}
+
+// rejectionReasonForValidate maps action.Validate errors to the short
+// stable codes the dashboard renders. Anything unknown collapses to
+// "invalid_action".
+func rejectionReasonForValidate(err error) string {
+	switch {
+	case errors.Is(err, action.ErrEmptyField):
+		return "invalid_action"
+	case errors.Is(err, action.ErrNonceShape):
+		return "invalid_nonce"
+	case errors.Is(err, action.ErrSchemaVersion):
+		return "schema_version"
+	default:
+		return "invalid_action"
+	}
 }
 
 // Subscribe registers a new subscriber and returns its channel plus a
@@ -236,9 +364,33 @@ func (p *Pipeline) Subscribe() (<-chan Event, func()) {
 	return ch, cancel
 }
 
-// EventsSince returns all events with leaf index >= since, in append
-// order. Used by the SSE handler to backfill before tailing live events.
+// EventsSince returns the appended events with LeafIndex >= since, in
+// append order. Rejected events are filtered out — this is the
+// historical contract auditors and the e2e suite rely on. Dashboard
+// callers that want the unified feed (appended + rejected) use
+// AllEventsSince instead.
 func (p *Pipeline) EventsSince(since uint64) []Event {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []Event
+	for _, e := range p.events {
+		if e.Kind != KindAppended {
+			continue
+		}
+		if e.LeafIndex < since {
+			continue
+		}
+		out = append(out, *e)
+	}
+	return out
+}
+
+// AllEventsSince returns appended + rejected events with Seq >= since,
+// in record order. Used by the SSE handler to backfill the dashboard
+// after reconnect. Seq is monotonic across both event kinds; the
+// dashboard caches the last-seen Seq and passes it as `since` on
+// reconnect.
+func (p *Pipeline) AllEventsSince(since uint64) []Event {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if since >= uint64(len(p.events)) {
@@ -251,11 +403,11 @@ func (p *Pipeline) EventsSince(since uint64) []Event {
 	return out
 }
 
-// Size reports the current number of recorded events. Equal to tree size.
+// Size reports the number of appended events — equivalently, the
+// Merkle tree size. Rejected events are not counted; they have no
+// leaf. Use AllEventsSince/len() to count the unified feed.
 func (p *Pipeline) Size() uint64 {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return uint64(len(p.events))
+	return p.tree.Size()
 }
 
 func (p *Pipeline) expired(recordedAt, now time.Time) bool {

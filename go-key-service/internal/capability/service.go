@@ -16,16 +16,23 @@ import (
 // Clock returns the current time. Injectable so tests can pin it.
 type Clock func() time.Time
 
+// RejectionSink is invoked on every Verify denial so an external
+// observer (the audit-log dashboard feed) can record token-policy
+// failures alongside Merkle append failures. It runs synchronously on
+// the verify path; impls must not block.
+type RejectionSink func(agentID, actionType, target, reason string)
+
 // Service issues, verifies, and revokes capability tokens. The service
 // owns its own Ed25519 signing key (in-memory; rotated on restart) and
 // consults the keystore to confirm agents exist at issuance time.
 type Service struct {
-	store      keystore.KeyStore
-	revocation RevocationStore
-	signPriv   ed25519.PrivateKey
-	signPub    ed25519.PublicKey
-	clock      Clock
-	logger     *slog.Logger
+	store         keystore.KeyStore
+	revocation    RevocationStore
+	signPriv      ed25519.PrivateKey
+	signPub       ed25519.PublicKey
+	clock         Clock
+	logger        *slog.Logger
+	rejectionSink RejectionSink
 }
 
 // Options configures a Service. Zero values get sensible defaults.
@@ -36,6 +43,8 @@ type Options struct {
 	// SigningKey lets callers inject a key (e.g. for tests). If nil, a
 	// fresh keypair is generated.
 	SigningPrivateKey ed25519.PrivateKey
+	// RejectionSink, if set, is called on every Verify denial.
+	RejectionSink RejectionSink
 }
 
 // NewService constructs a Service. The keystore is required; everything
@@ -71,13 +80,28 @@ func NewService(store keystore.KeyStore, opts Options) (*Service, error) {
 		pub = priv.Public().(ed25519.PublicKey)
 	}
 	return &Service{
-		store:      store,
-		revocation: rev,
-		signPriv:   priv,
-		signPub:    pub,
-		clock:      clock,
-		logger:     logger,
+		store:         store,
+		revocation:    rev,
+		signPriv:      priv,
+		signPub:       pub,
+		clock:         clock,
+		logger:        logger,
+		rejectionSink: opts.RejectionSink,
 	}, nil
+}
+
+// SetRejectionSink installs a sink after construction. Useful when the
+// capability service and the audit pipeline are wired in different
+// orders during startup.
+func (s *Service) SetRejectionSink(sink RejectionSink) {
+	s.rejectionSink = sink
+}
+
+func (s *Service) emitRejection(req VerifyRequest, reason string) {
+	if s.rejectionSink == nil {
+		return
+	}
+	s.rejectionSink(req.AgentID, req.ActionType, req.Target, reason)
 }
 
 // IssueRequest is the input to Service.Issue.
@@ -134,33 +158,43 @@ type VerifyRequest struct {
 }
 
 // Verify returns the parsed token on success, or one of the
-// capability.Err* sentinels.
+// capability.Err* sentinels. Every denial path also calls the
+// configured RejectionSink (if any) so the dashboard feed surfaces
+// token policy failures alongside Merkle pipeline rejections.
 func (s *Service) Verify(_ context.Context, req VerifyRequest) (*Token, error) {
 	var tok Token
 	if err := json.Unmarshal(req.ClaimsJSON, &tok); err != nil {
+		s.emitRejection(req, "malformed_token")
 		return nil, ErrMalformedToken
 	}
 	canonical, err := tok.Canonical()
 	if err != nil {
+		s.emitRejection(req, "malformed_token")
 		return nil, ErrMalformedToken
 	}
 	if !ed25519.Verify(s.signPub, canonical, req.Signature) {
+		s.emitRejection(req, "invalid_signature")
 		return nil, ErrInvalidSignature
 	}
 	if s.clock().Unix() >= tok.ExpiresAt {
+		s.emitRejection(req, "expired")
 		return nil, ErrExpired
 	}
 	if s.revocation.IsRevoked(tok.TokenID) {
+		s.emitRejection(req, "revoked")
 		return nil, ErrRevoked
 	}
 	if tok.AgentID != req.AgentID {
+		s.emitRejection(req, "agent_mismatch")
 		return nil, ErrAgentMismatch
 	}
 	actionOK, targetOK := tok.Allows(req.ActionType, req.Target)
 	if !actionOK {
+		s.emitRejection(req, "action_type_not_allowed")
 		return nil, ErrActionTypeNotAllowed
 	}
 	if !targetOK {
+		s.emitRejection(req, "target_not_allowed")
 		return nil, ErrTargetNotAllowed
 	}
 	return &tok, nil

@@ -341,6 +341,71 @@ func TestSubscribeCancelStopsDelivery(t *testing.T) {
 	}
 }
 
+func TestSubmitBroadcastsRejectionOnBadSignature(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	p, store, _ := newPipelineAt(t, now)
+	newAgent(t, store, "agent-1")
+
+	ch, cancel := p.Subscribe()
+	defer cancel()
+
+	a := makeAction("agent-1", now.UnixMilli(), randNonce(t))
+	bad := make([]byte, ed25519.SignatureSize)
+	if _, _, err := p.Submit(context.Background(), a, bad); !errors.Is(err, ErrInvalidSignature) {
+		t.Fatalf("submit err: got %v want ErrInvalidSignature", err)
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.Kind != KindRejected {
+			t.Fatalf("kind: got %q want %q", ev.Kind, KindRejected)
+		}
+		if ev.Reason != "invalid_signature" {
+			t.Fatalf("reason: got %q want invalid_signature", ev.Reason)
+		}
+		if ev.AgentID != "agent-1" {
+			t.Fatalf("agent_id: got %q", ev.AgentID)
+		}
+		if ev.LeafHash != nil {
+			t.Fatalf("rejection should have no leaf hash")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscriber did not receive rejection event")
+	}
+}
+
+func TestRecordRejectionBroadcastsAndPersists(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	p, _, _ := newPipelineAt(t, now)
+
+	ch, cancel := p.Subscribe()
+	defer cancel()
+
+	p.RecordRejection("agent-x", "transfer_funds", "treasury", "expired")
+
+	select {
+	case ev := <-ch:
+		if ev.Kind != KindRejected || ev.Reason != "expired" || ev.AgentID != "agent-x" {
+			t.Fatalf("event: %+v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no event")
+	}
+
+	got := p.AllEventsSince(0)
+	if len(got) != 1 || got[0].Kind != KindRejected {
+		t.Fatalf("AllEventsSince: %+v", got)
+	}
+	if got[0].Seq != 0 {
+		t.Fatalf("seq: got %d want 0", got[0].Seq)
+	}
+
+	// EventsSince filters out rejections — historical contract.
+	if appendedOnly := p.EventsSince(0); len(appendedOnly) != 0 {
+		t.Fatalf("EventsSince should hide rejections, got %+v", appendedOnly)
+	}
+}
+
 func TestEventsSinceReplay(t *testing.T) {
 	now := time.UnixMilli(1_700_000_000_000)
 	p, store, _ := newPipelineAt(t, now)

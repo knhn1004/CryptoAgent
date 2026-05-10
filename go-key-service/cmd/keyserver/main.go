@@ -34,7 +34,10 @@ func main() {
 	store := keystore.NewMemory()
 	tree := merkle.New()
 	pipeline := auditlog.New(tree, store)
-	capSvc, err := capability.NewService(store, capability.Options{Logger: logger})
+	capSvc, err := capability.NewService(store, capability.Options{
+		Logger:        logger,
+		RejectionSink: pipeline.RecordRejection,
+	})
 	if err != nil {
 		logger.Error("capability", "err", err)
 		os.Exit(1)
@@ -42,7 +45,9 @@ func main() {
 
 	apiServer := httpapi.NewServer(store, logger).
 		WithAuditPipeline(pipeline).
-		WithCapability(capSvc)
+		WithCapability(capSvc).
+		WithMerkleTree(tree).
+		WithCORS(cfg.CORSOrigins)
 
 	var committer *anchor.Committer
 	if cfg.AnchorMode != config.AnchorOff {
