@@ -2,14 +2,17 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/knhn1004/CryptoAgent/go-key-service/internal/keystore"
+	"github.com/knhn1004/CryptoAgent/go-key-service/internal/merkle"
 )
 
 func newTestServer() *Server {
@@ -194,6 +197,91 @@ func TestGetAgentPubKeyMissing(t *testing.T) {
 	}
 	if body["error"] != "not_found" {
 		t.Fatalf("error code: %v", body["error"])
+	}
+}
+
+func TestStatusRecorderForwardsFlush(t *testing.T) {
+	// Regression: logRequests wraps the writer in statusRecorder, which
+	// previously hid the Flusher and broke /v1/audit/events. Verify that
+	// the wrapper still satisfies http.Flusher when constructed over a
+	// flushable backing writer.
+	rec := httptest.NewRecorder()
+	sr := &statusRecorder{ResponseWriter: rec, status: 200}
+	if _, ok := any(sr).(http.Flusher); !ok {
+		t.Fatal("statusRecorder must implement http.Flusher")
+	}
+}
+
+func TestMerkleHead(t *testing.T) {
+	tree := merkle.New()
+	if _, err := tree.Append([]byte("alpha")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if _, err := tree.Append([]byte("beta")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	srv := NewServer(keystore.NewMemory(), slog.New(slog.NewTextHandler(io.Discard, nil))).WithMerkleTree(tree)
+	rec, body := do(t, srv.Router(), http.MethodGet, "/v1/merkle/head", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d", rec.Code)
+	}
+	if size, _ := body["size"].(float64); size != 2 {
+		t.Fatalf("size: got %v want 2", body["size"])
+	}
+	root, _ := body["root_hex"].(string)
+	if !strings.HasPrefix(root, "0x") {
+		t.Fatalf("root_hex must be 0x-prefixed: %q", root)
+	}
+	wantSize, wantRoot := tree.Snapshot()
+	if size, _ := body["size"].(float64); uint64(size) != wantSize {
+		t.Fatalf("size mismatch: got %v want %d", body["size"], wantSize)
+	}
+	if root != "0x"+hex.EncodeToString(wantRoot) {
+		t.Fatalf("root mismatch: got %s want 0x%s", root, hex.EncodeToString(wantRoot))
+	}
+}
+
+func TestMerkleHeadNotMountedWithoutTree(t *testing.T) {
+	h := newTestServer().Router()
+	rec, _ := do(t, h, http.MethodGet, "/v1/merkle/head", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404", rec.Code)
+	}
+}
+
+func TestCORSAllowed(t *testing.T) {
+	srv := NewServer(keystore.NewMemory(), slog.New(slog.NewTextHandler(io.Discard, nil))).
+		WithCORS([]string{"http://localhost:5173"})
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("ACAO: got %q", got)
+	}
+}
+
+func TestCORSPreflight(t *testing.T) {
+	srv := NewServer(keystore.NewMemory(), slog.New(slog.NewTextHandler(io.Discard, nil))).
+		WithCORS([]string{"http://localhost:5173"})
+	req := httptest.NewRequest(http.MethodOptions, "/v1/keys", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want 204", rec.Code)
+	}
+}
+
+func TestCORSDisallowedOrigin(t *testing.T) {
+	srv := NewServer(keystore.NewMemory(), slog.New(slog.NewTextHandler(io.Discard, nil))).
+		WithCORS([]string{"http://localhost:5173"})
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Origin", "http://evil.example")
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("ACAO should be empty for disallowed origin, got %q", got)
 	}
 }
 

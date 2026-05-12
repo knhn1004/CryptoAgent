@@ -62,6 +62,10 @@ type Config struct {
 	AnchorRPCURL          string
 	AnchorPrivateKey      Secret
 	AnchorCastBinary      string
+
+	// CORSOrigins is the comma-separated allowlist of dashboard origins
+	// (e.g. http://localhost:5173). nil = CORS off.
+	CORSOrigins []string
 }
 
 func Load() (Config, error) {
@@ -70,6 +74,7 @@ func Load() (Config, error) {
 		LogLevel:       slog.LevelInfo,
 		AnchorMode:     AnchorMode(strings.ToLower(getEnv("ANCHOR_MODE", string(AnchorOff)))),
 		AnchorInterval: 15 * time.Minute,
+		CORSOrigins:    parseOrigins(os.Getenv("KEYSERVER_CORS_ORIGINS")),
 	}
 	if raw := os.Getenv("KEYSERVER_LOG_LEVEL"); raw != "" {
 		lvl, err := parseLevel(raw)
@@ -105,6 +110,23 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: unknown ANCHOR_MODE %q", cfg.AnchorMode)
 	}
 	return cfg, nil
+}
+
+func parseOrigins(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func getEnv(key, def string) string {
