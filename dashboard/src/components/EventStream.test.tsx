@@ -40,9 +40,16 @@ describe("EventStream", () => {
   });
 
   it("flags ACL denials distinctly from generic rejections", () => {
-    render(<EventStream events={[rejected]} anchor={null} connected={true} />);
+    const genericRejected: AuditEvent = {
+      ...rejected,
+      seq: 2,
+      reason: "invalid_signature",
+    };
+    render(<EventStream events={[rejected, genericRejected]} anchor={null} connected={true} />);
     expect(screen.getByText("ACL")).toBeInTheDocument();
     expect(screen.getByText("ACL: action denied")).toBeInTheDocument();
+    expect(screen.getByText("REJECT")).toBeInTheDocument();
+    expect(screen.getByText("Invalid signature")).toBeInTheDocument();
   });
 
   it("shows anchor badge when anchor is set", () => {

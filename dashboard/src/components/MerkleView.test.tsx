@@ -19,7 +19,7 @@ function makeAppended(seq: number, agent: string): AppendedEvent {
     },
     signature: "0".repeat(128),
     public_key: "0".repeat(64),
-    recorded_at: new Date().toISOString(),
+    recorded_at: "2025-01-01T00:00:00Z",
   };
 }
 
@@ -48,7 +48,7 @@ describe("MerkleView", () => {
         kind: "rejected" as const,
         agent_id: "mallory",
         reason: "invalid_signature",
-        recorded_at: new Date().toISOString(),
+        recorded_at: "2025-01-01T00:00:01Z",
       },
     ];
     render(

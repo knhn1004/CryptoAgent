@@ -40,6 +40,7 @@ export function useAuditStream(): State {
           const ev = JSON.parse(msg.data) as AuditEvent;
           if (ev.seq <= lastSeqRef.current) return; // dedup on reconnect
           lastSeqRef.current = ev.seq;
+          setError(null);
           setEvents((prev) => {
             const next = prev.length >= MAX_EVENTS ? prev.slice(prev.length - MAX_EVENTS + 1) : prev.slice();
             next.push(ev);
@@ -52,6 +53,7 @@ export function useAuditStream(): State {
       es.onerror = () => {
         if (cancelled) return;
         setConnected(false);
+        setError("event stream connection lost");
         es?.close();
         const wait = backoffMs;
         backoffMs = Math.min(backoffMs * 2, 8000);

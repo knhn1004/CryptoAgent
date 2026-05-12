@@ -64,7 +64,7 @@ type Config struct {
 	AnchorCastBinary      string
 
 	// CORSOrigins is the comma-separated allowlist of dashboard origins
-	// (e.g. http://localhost:5173). Empty = CORS off.
+	// (e.g. http://localhost:5173). nil = CORS off.
 	CORSOrigins []string
 }
 
@@ -122,6 +122,9 @@ func parseOrigins(raw string) []string {
 		if t := strings.TrimSpace(p); t != "" {
 			out = append(out, t)
 		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

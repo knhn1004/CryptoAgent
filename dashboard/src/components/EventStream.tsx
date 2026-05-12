@@ -23,6 +23,7 @@ const REASON_LABELS: Record<string, string> = {
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "--:--:--.---";
   return d.toLocaleTimeString([], { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0");
 }
 
@@ -44,7 +45,7 @@ export function EventStream({ events, anchor, connected }: Props) {
               title={`Anchor #${anchor.id}, root ${anchor.root_hex}`}
             >
               ⚓ anchor #{anchor.id}
-              {anchor.block_number ? ` · block ${anchor.block_number}` : " · dry-run"}
+              {anchor.block_number != null ? ` · block ${anchor.block_number}` : " · dry-run"}
             </span>
           )}
           <span
@@ -58,7 +59,13 @@ export function EventStream({ events, anchor, connected }: Props) {
           </span>
         </div>
       </div>
-      <div className="scrollbar-thin flex-1 overflow-auto rounded border border-slate-800 bg-slate-900/40">
+      <div
+        className="scrollbar-thin flex-1 overflow-auto rounded border border-slate-800 bg-slate-900/40"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label="Live audit event stream"
+      >
         {ordered.length === 0 ? (
           <div className="p-4 text-sm text-slate-500">Waiting for events…</div>
         ) : (

@@ -125,12 +125,14 @@ func (h *handler) stream(w http.ResponseWriter, r *http.Request) {
 	// suppress duplicates that may have arrived between EventsSince and
 	// Subscribe. Seq is monotonic across both appended and rejected
 	// events, unlike LeafIndex which only applies to successful appends.
-	var lastSent int64 = int64(since) - 1
+	lastSent := uint64(0)
+	lastSentSet := false
 	for _, ev := range h.p.AllEventsSince(since) {
 		if err := writeSSE(w, ev); err != nil {
 			return
 		}
-		lastSent = int64(ev.Seq)
+		lastSent = ev.Seq
+		lastSentSet = true
 	}
 	flusher.Flush()
 
@@ -143,13 +145,14 @@ func (h *handler) stream(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if int64(ev.Seq) <= lastSent {
+			if lastSentSet && ev.Seq <= lastSent {
 				continue
 			}
 			if err := writeSSE(w, ev); err != nil {
 				return
 			}
-			lastSent = int64(ev.Seq)
+			lastSent = ev.Seq
+			lastSentSet = true
 			flusher.Flush()
 		}
 	}

@@ -192,9 +192,10 @@ func New(tree *merkle.Tree, store keystore.KeyStore, opts ...Option) *Pipeline {
 // a new leaf was appended, false when the call hit the idempotency cache
 // (in which case the cached Event is returned with a nil error).
 //
-// Every error path before return also broadcasts a Kind=="rejected"
-// Event, so dashboard subscribers see denials in real time alongside
-// successful appends.
+// Validation and policy denial paths before return also broadcast a
+// Kind=="rejected" Event, so dashboard subscribers see denials in real
+// time alongside successful appends. Infrastructure failures such as
+// canonicalization or Merkle append errors return without broadcasting.
 func (p *Pipeline) Submit(ctx context.Context, a *action.Action, sig []byte) (*Event, bool, error) {
 	if a == nil {
 		return nil, false, ErrSchemaVersion
@@ -407,6 +408,8 @@ func (p *Pipeline) AllEventsSince(since uint64) []Event {
 // Merkle tree size. Rejected events are not counted; they have no
 // leaf. Use AllEventsSince/len() to count the unified feed.
 func (p *Pipeline) Size() uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.tree.Size()
 }
 

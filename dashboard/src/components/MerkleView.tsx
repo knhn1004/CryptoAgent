@@ -14,11 +14,14 @@ function truncHash(h: string, head = 6, tail = 4): string {
 }
 
 function formatRelative(ms: number): string {
+  if (!Number.isFinite(ms)) return "unknown";
   const dt = Date.now() - ms;
+  if (dt < 0) return "in the future";
   if (dt < 1000) return "just now";
   if (dt < 60_000) return `${Math.floor(dt / 1000)}s ago`;
   if (dt < 3_600_000) return `${Math.floor(dt / 60_000)}m ago`;
-  return `${Math.floor(dt / 3_600_000)}h ago`;
+  if (dt < 86_400_000) return `${Math.floor(dt / 3_600_000)}h ago`;
+  return `${Math.floor(dt / 86_400_000)}d ago`;
 }
 
 export function MerkleView({ head, anchor, events }: Props) {
@@ -38,7 +41,7 @@ export function MerkleView({ head, anchor, events }: Props) {
           {anchor ? truncHash(anchor.root_hex, 10, 8) : "no anchor yet"}
         </Tile>
         <Tile label="Anchor block">
-          {anchor?.block_number ? `#${anchor.block_number.toLocaleString()}` : anchor ? "dry-run" : "—"}
+          {anchor?.block_number != null ? `#${anchor.block_number.toLocaleString()}` : anchor ? "dry-run" : "—"}
           {anchor && (
             <span className="ml-2 text-xs text-slate-400">
               size {anchor.tree_size} · {formatRelative(anchor.timestamp_ms)}
@@ -63,7 +66,7 @@ export function MerkleView({ head, anchor, events }: Props) {
                   <span className="flex-1 truncate text-slate-400">
                     {ev.action.agent_id} → {ev.action.action_type}
                   </span>
-                  <span className="text-slate-500">{formatRelative(new Date(ev.recorded_at).getTime())}</span>
+                  <span className="text-slate-500">{formatRelative(Date.parse(ev.recorded_at))}</span>
                 </li>
               ))}
             </ul>

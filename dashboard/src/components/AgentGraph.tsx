@@ -19,6 +19,10 @@ function colorForActionType(t: string): string {
   return PALETTE[h % PALETTE.length];
 }
 
+function edgeKey(agent: string, actionType: string, target: string): string {
+  return JSON.stringify([agent, actionType, target]);
+}
+
 // Build {nodes, edges} from the event stream. Each agent that appears
 // is a node; each (agent, action_type, target) tuple is an edge from
 // the agent to the target. Rejected events get a red overlay.
@@ -34,7 +38,7 @@ function deriveGraph(events: AuditEvent[], knownAgents: string[]): { nodes: Node
     if (!agent || !actionType || !target) continue;
     agents.add(agent);
     targets.add(target);
-    const key = `${agent}|${actionType}|${target}`;
+    const key = edgeKey(agent, actionType, target);
     const cur = edgeMap.get(key) ?? { count: 0, rejected: 0, actionType };
     cur.count++;
     if (ev.kind === "rejected") cur.rejected++;
@@ -72,7 +76,7 @@ function deriveGraph(events: AuditEvent[], knownAgents: string[]): { nodes: Node
 
   const edges: Edge[] = [];
   for (const [key, info] of edgeMap.entries()) {
-    const [agent, actionType, target] = key.split("|");
+    const [agent, actionType, target] = JSON.parse(key) as [string, string, string];
     const allRejected = info.rejected > 0 && info.rejected === info.count;
     const someRejected = info.rejected > 0 && !allRejected;
     const stroke = allRejected ? "#ef4444" : colorForActionType(actionType);

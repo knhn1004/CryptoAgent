@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +34,7 @@ type Service struct {
 	signPub       ed25519.PublicKey
 	clock         Clock
 	logger        *slog.Logger
+	rejectionMu   sync.RWMutex
 	rejectionSink RejectionSink
 }
 
@@ -94,14 +97,24 @@ func NewService(store keystore.KeyStore, opts Options) (*Service, error) {
 // capability service and the audit pipeline are wired in different
 // orders during startup.
 func (s *Service) SetRejectionSink(sink RejectionSink) {
+	s.rejectionMu.Lock()
+	defer s.rejectionMu.Unlock()
 	s.rejectionSink = sink
 }
 
 func (s *Service) emitRejection(req VerifyRequest, reason string) {
-	if s.rejectionSink == nil {
+	s.rejectionMu.RLock()
+	sink := s.rejectionSink
+	s.rejectionMu.RUnlock()
+	if sink == nil {
 		return
 	}
-	s.rejectionSink(req.AgentID, req.ActionType, req.Target, reason)
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("rejection sink panic", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	sink(req.AgentID, req.ActionType, req.Target, reason)
 }
 
 // IssueRequest is the input to Service.Issue.
